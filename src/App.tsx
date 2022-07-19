@@ -1,4 +1,4 @@
-import * as React from "react";
+import React, { useState, useEffect } from "react";
 import styled from "styled-components";
 import WalletConnect from "@walletconnect/client";
 import QRCodeModal from "@walletconnect/qrcode-modal";
@@ -155,20 +155,48 @@ const INITIAL_STATE: IAppState = {
   assets: [],
 };
 
-class App extends React.Component<any, any> {
-  public state: IAppState = {
-    ...INITIAL_STATE,
-  };
+// bridge url
+const bridge = "https://bridge.walletconnect.org";
 
-  public connect = async () => {
-    // bridge url
-    const bridge = "https://bridge.walletconnect.org";
+// create new connector
+const connector = new WalletConnect({ bridge, qrcodeModal: QRCodeModal });
 
-    // create new connector
-    const connector = new WalletConnect({ bridge, qrcodeModal: QRCodeModal });
+const App = () => {
+  const [state, setState] = useState<IAppState>({
+    connector: null,
+    fetching: false,
+    connected: false,
+    chainId: 1,
+    showModal: false,
+    pendingRequest: false,
+    uri: "",
+    accounts: [],
+    address: "",
+    result: null,
+    assets: [],
+  });
 
-    await this.setState({ connector });
+  // console.log("connector", connector.connected);
 
+  useEffect(() => {
+    setState(prev => ({ ...prev, connector }));
+
+    if (connector && connector.connected) {
+      const { chainId, accounts } = connector;
+      const address = accounts[0];
+      setState(prev => {
+        return {
+          ...prev,
+          connected: true,
+          chainId,
+          accounts,
+          address,
+        };
+      });
+    }
+  }, [connector.connected]);
+
+  const connect = async () => {
     // check if already connected
     if (!connector.connected) {
       // create new session
@@ -176,10 +204,11 @@ class App extends React.Component<any, any> {
     }
 
     // subscribe to events
-    await this.subscribeToEvents();
+    await subscribeToEvents();
   };
-  public subscribeToEvents = () => {
-    const { connector } = this.state;
+
+  const subscribeToEvents = () => {
+    const { connector } = state;
 
     if (!connector) {
       return;
@@ -193,7 +222,7 @@ class App extends React.Component<any, any> {
       }
 
       const { chainId, accounts } = payload.params[0];
-      this.onSessionUpdate(accounts, chainId);
+      onSessionUpdate(accounts, chainId);
     });
 
     connector.on("connect", (error, payload) => {
@@ -203,7 +232,7 @@ class App extends React.Component<any, any> {
         throw error;
       }
 
-      this.onConnect(payload);
+      onConnect(payload);
     });
 
     connector.on("disconnect", (error, payload) => {
@@ -213,76 +242,122 @@ class App extends React.Component<any, any> {
         throw error;
       }
 
-      this.onDisconnect();
+      onDisconnect();
     });
 
     if (connector.connected) {
       const { chainId, accounts } = connector;
       const address = accounts[0];
-      this.setState({
+      setState(prev => {
+        return {
+          ...prev,
+          connected: true,
+          chainId,
+          accounts,
+          address,
+        };
+      });
+      onSessionUpdate(accounts, chainId);
+    }
+    setState(prev => {
+      return {
+        ...prev,
+        connector,
+      };
+    });
+  };
+
+  const killSession = async () => {
+    const { connector } = state;
+    if (connector) {
+      connector.killSession();
+    }
+    resetApp();
+  };
+
+  const resetApp = async () => {
+    setState(prev => {
+      return {
+        ...prev,
+        ...INITIAL_STATE,
+      };
+    });
+  };
+
+  const onConnect = async (payload: IInternalEvent) => {
+    const { chainId, accounts } = payload.params[0];
+    const address = accounts[0];
+    setState(prev => {
+      return {
+        ...prev,
         connected: true,
         chainId,
         accounts,
         address,
-      });
-      this.onSessionUpdate(accounts, chainId);
-    }
-
-    this.setState({ connector });
-  };
-
-  public killSession = async () => {
-    const { connector } = this.state;
-    if (connector) {
-      connector.killSession();
-    }
-    this.resetApp();
-  };
-
-  public resetApp = async () => {
-    await this.setState({ ...INITIAL_STATE });
-  };
-
-  public onConnect = async (payload: IInternalEvent) => {
-    const { chainId, accounts } = payload.params[0];
-    const address = accounts[0];
-    await this.setState({
-      connected: true,
-      chainId,
-      accounts,
-      address,
+      };
     });
-    this.getAccountAssets();
+    getAccountAssets();
   };
 
-  public onDisconnect = async () => {
-    this.resetApp();
+  const onDisconnect = async () => {
+    resetApp();
   };
 
-  public onSessionUpdate = async (accounts: string[], chainId: number) => {
+  const onSessionUpdate = async (accounts: string[], chainId: number) => {
     const address = accounts[0];
-    await this.setState({ chainId, accounts, address });
-    await this.getAccountAssets();
+    setState(prev => {
+      return {
+        ...prev,
+        chainId,
+        accounts,
+        address,
+      };
+    });
+    await getAccountAssets();
   };
 
-  public getAccountAssets = async () => {
-    const { address, chainId } = this.state;
-    this.setState({ fetching: true });
+  const getAccountAssets = async () => {
+    const { address, chainId } = state;
+    setState(prev => {
+      return {
+        ...prev,
+        fetching: true,
+      };
+    });
     try {
       // get account balances
       const assets = await apiGetAccountAssets(address, chainId);
 
-      await this.setState({ fetching: false, address, assets });
+      setState(prev => {
+        return {
+          ...prev,
+          fetching: false,
+          address,
+          assets,
+        };
+      });
     } catch (error) {
       console.error(error);
-      await this.setState({ fetching: false });
+      setState(prev => {
+        return {
+          ...prev,
+          fetching: false,
+        };
+      });
     }
   };
 
-  public toggleModal = () => this.setState({ showModal: !this.state.showModal });
+  const toggleModal = () => {
+    setState(prev => {
+      return {
+        ...prev,
+        showModal: !state.showModal,
+      };
+    });
+  };
 
-  public testSendTransaction = async () => {
-    const { connector, address, chainId } = this.state;
+  const testSendTransaction = async () => {
+    const { connector, address, chainId } = state;
 
     if (!connector) {
       return;
@@ -327,10 +402,15 @@ class App extends React.Component<any, any> {
 
     try {
       // open modal
-      this.toggleModal();
+      toggleModal();
 
       // toggle pending request indicator
-      this.setState({ pendingRequest: true });
+      setState(prev => {
+        return {
+          ...prev,
+          pendingRequest: true,
+        };
+      });
 
       // send transaction
       const result = await connector.sendTransaction(tx);
@@ -345,19 +425,29 @@ class App extends React.Component<any, any> {
       };
 
       // display result
-      this.setState({
-        connector,
-        pendingRequest: false,
-        result: formattedResult || null,
+      setState(prev => {
+        return {
+          ...prev,
+          connector,
+          pendingRequest: false,
+          result: formattedResult || null,
+        };
       });
     } catch (error) {
       console.error(error);
-      this.setState({ connector, pendingRequest: false, result: null });
+      setState(prev => {
+        return {
+          ...prev,
+          connector,
+          pendingRequest: false,
+          result: null,
+        };
+      });
     }
   };
 
-  public testSignTransaction = async () => {
-    const { connector, address, chainId } = this.state;
+  const testSignTransaction = async () => {
+    const { connector, address, chainId } = state;
 
     if (!connector) {
       return;
@@ -402,10 +492,12 @@ class App extends React.Component<any, any> {
 
     try {
       // open modal
-      this.toggleModal();
+      toggleModal();
 
       // toggle pending request indicator
-      this.setState({ pendingRequest: true });
+      setState(prev => {
+        return { ...prev, pendingRequest: true };
+      });
 
       // send transaction
       const result = await connector.signTransaction(tx);
@@ -420,19 +512,19 @@ class App extends React.Component<any, any> {
       };
 
       // display result
-      this.setState({
-        connector,
-        pendingRequest: false,
-        result: formattedResult || null,
+      setState(prev => {
+        return { ...prev, connector, pendingRequest: false, result: formattedResult || null };
       });
     } catch (error) {
       console.error(error);
-      this.setState({ connector, pendingRequest: false, result: null });
+      setState(prev => {
+        return { ...prev, connector, pendingRequest: false, result: null };
+      });
     }
   };
 
-  public testLegacySignMessage = async () => {
-    const { connector, address, chainId } = this.state;
+  const testLegacySignMessage = async () => {
+    const { connector, address, chainId } = state;
 
     if (!connector) {
       return;
@@ -449,10 +541,12 @@ class App extends React.Component<any, any> {
 
     try {
       // open modal
-      this.toggleModal();
+      toggleModal();
 
       // toggle pending request indicator
-      this.setState({ pendingRequest: true });
+      setState(prev => {
+        return { ...prev, pendingRequest: true };
+      });
 
       // send message
       const result = await connector.signMessage(msgParams);
@@ -469,19 +563,19 @@ class App extends React.Component<any, any> {
       };
 
       // display result
-      this.setState({
-        connector,
-        pendingRequest: false,
-        result: formattedResult || null,
+      setState(prev => {
+        return { ...prev, connector, pendingRequest: false, result: formattedResult || null };
       });
     } catch (error) {
       console.error(error);
-      this.setState({ connector, pendingRequest: false, result: null });
+      setState(prev => {
+        return { ...prev, connector, pendingRequest: false, result: null };
+      });
     }
   };
 
-  public testStandardSignMessage = async () => {
-    const { connector, address, chainId } = this.state;
+  const testStandardSignMessage = async () => {
+    const { connector, address, chainId } = state;
 
     if (!connector) {
       return;
@@ -498,10 +592,12 @@ class App extends React.Component<any, any> {
 
     try {
       // open modal
-      this.toggleModal();
+      toggleModal();
 
       // toggle pending request indicator
-      this.setState({ pendingRequest: true });
+      setState(prev => {
+        return { ...prev, pendingRequest: true };
+      });
 
       // send message
       const result = await connector.signMessage(msgParams);
@@ -519,19 +615,19 @@ class App extends React.Component<any, any> {
       };
 
       // display result
-      this.setState({
-        connector,
-        pendingRequest: false,
-        result: formattedResult || null,
+      setState(prev => {
+        return { ...prev, connector, pendingRequest: false, result: formattedResult || null };
       });
     } catch (error) {
       console.error(error);
-      this.setState({ connector, pendingRequest: false, result: null });
+      setState(prev => {
+        return { ...prev, connector, pendingRequest: false, result: null };
+      });
     }
   };
 
-  public testPersonalSignMessage = async () => {
-    const { connector, address, chainId } = this.state;
+  const testPersonalSignMessage = async () => {
+    const { connector, address, chainId } = state;
 
     if (!connector) {
       return;
@@ -548,10 +644,15 @@ class App extends React.Component<any, any> {
 
     try {
       // open modal
-      this.toggleModal();
+      toggleModal();
 
       // toggle pending request indicator
-      this.setState({ pendingRequest: true });
+      setState(prev => {
+        return {
+          ...prev,
+          pendingRequest: true,
+        };
+      });
 
       // send message
       const result = await connector.signPersonalMessage(msgParams);
@@ -569,19 +670,19 @@ class App extends React.Component<any, any> {
       };
 
       // display result
-      this.setState({
-        connector,
-        pendingRequest: false,
-        result: formattedResult || null,
+      setState(prev => {
+        return { ...prev, connector, pendingRequest: false, result: formattedResult || null };
       });
     } catch (error) {
       console.error(error);
-      this.setState({ connector, pendingRequest: false, result: null });
+      setState(prev => {
+        return { ...prev, connector, pendingRequest: false, result: null };
+      });
     }
   };
 
-  public testSignTypedData = async () => {
-    const { connector, address, chainId } = this.state;
+  const testSignTypedData = async () => {
+    const { connector, address, chainId } = state;
 
     if (!connector) {
       return;
@@ -594,10 +695,12 @@ class App extends React.Component<any, any> {
 
     try {
       // open modal
-      this.toggleModal();
+      toggleModal();
 
       // toggle pending request indicator
-      this.setState({ pendingRequest: true });
+      setState(prev => {
+        return { ...prev, pendingRequest: true };
+      });
 
       // sign typed data
       const result = await connector.signTypedData(msgParams);
@@ -615,121 +718,108 @@ class App extends React.Component<any, any> {
       };
 
       // display result
-      this.setState({
-        connector,
-        pendingRequest: false,
-        result: formattedResult || null,
+      setState(prev => {
+        return { ...prev, connector, pendingRequest: false, result: formattedResult || null };
       });
     } catch (error) {
       console.error(error);
-      this.setState({ connector, pendingRequest: false, result: null });
+      setState(prev => {
+        return { ...prev, connector, pendingRequest: false, result: null };
+      });
     }
   };
 
-  public render = () => {
-    const {
-      assets,
-      address,
-      connected,
-      chainId,
-      fetching,
-      showModal,
-      pendingRequest,
-      result,
-    } = this.state;
-    return (
-      <SLayout>
-        <Column maxWidth={1000} spanHeight>
-          <Header
-            connected={connected}
-            address={address}
-            chainId={chainId}
-            killSession={this.killSession}
-          />
-          <SContent>
-            {!address && !assets.length ? (
-              <SLanding center>
-                <h3>
-                  {`Try out WalletConnect`}
-                  <br />
-                  <span>{`v${process.env.REACT_APP_VERSION}`}</span>
-                </h3>
-                <SButtonContainer>
-                  <SConnectButton left onClick={this.connect} fetching={fetching}>
-                    {"Connect to WalletConnect"}
-                  </SConnectButton>
-                </SButtonContainer>
-              </SLanding>
-            ) : (
-              <SBalances>
-                <Banner />
-                <h3>Actions</h3>
-                <Column center>
-                  <STestButtonContainer>
-                    <STestButton left onClick={this.testSendTransaction}>
-                      {"eth_sendTransaction"}
-                    </STestButton>
-                    <STestButton left onClick={this.testSignTransaction}>
-                      {"eth_signTransaction"}
-                    </STestButton>
-                    <STestButton left onClick={this.testSignTypedData}>
-                      {"eth_signTypedData"}
-                    </STestButton>
-                    <STestButton left onClick={this.testLegacySignMessage}>
-                      {"eth_sign (legacy)"}
-                    </STestButton>
-                    <STestButton left onClick={this.testStandardSignMessage}>
-                      {"eth_sign (standard)"}
-                    </STestButton>
-                    <STestButton left onClick={this.testPersonalSignMessage}>
-                      {"personal_sign"}
-                    </STestButton>
-                  </STestButtonContainer>
-                </Column>
-                <h3>Balances</h3>
-                {!fetching ? (
-                  <AccountAssets chainId={chainId} assets={assets} />
-                ) : (
-                  <Column center>
-                    <SContainer>
-                      <Loader />
-                    </SContainer>
-                  </Column>
-                )}
-              </SBalances>
-            )}
-          </SContent>
-        </Column>
-        <Modal show={showModal} toggleModal={this.toggleModal}>
-          {pendingRequest ? (
-            <SModalContainer>
-              <SModalTitle>{"Pending Call Request"}</SModalTitle>
-              <SContainer>
-                <Loader />
-                <SModalParagraph>{"Approve or reject request using your wallet"}</SModalParagraph>
-              </SContainer>
-            </SModalContainer>
-          ) : result ? (
-            <SModalContainer>
-              <SModalTitle>{"Call Request Approved"}</SModalTitle>
-              <STable>
-                {Object.keys(result).map(key => (
-                  <SRow key={key}>
-                    <SKey>{key}</SKey>
-                    <SValue>{result[key].toString()}</SValue>
-                  </SRow>
-                ))}
-              </STable>
-            </SModalContainer>
+  return (
+    <SLayout>
+      <Column maxWidth={1000} spanHeight>
+        <Header
+          connected={state.connected}
+          address={state.address}
+          chainId={state.chainId}
+          killSession={killSession}
+        />
+        <SContent>
+          {!state.address && !state.connected ? (
+            <SLanding center>
+              <h3>
+                {`Try out WalletConnect`}
+                <br />
+                <span>{`v${process.env.REACT_APP_VERSION}`}</span>
+              </h3>
+              <SButtonContainer>
+                <SConnectButton left onClick={connect} fetching={state.fetching}>
+                  {"Connect to WalletConnect"}
+                </SConnectButton>
+              </SButtonContainer>
+            </SLanding>
           ) : (
-            <SModalContainer>
-              <SModalTitle>{"Call Request Rejected"}</SModalTitle>
-            </SModalContainer>
+            <SBalances>
+              <Banner />
+              <h3>Actions</h3>
+              <Column center>
+                <STestButtonContainer>
+                  <STestButton left onClick={testSendTransaction}>
+                    {"eth_sendTransaction"}
+                  </STestButton>
+                  <STestButton left onClick={testSignTransaction}>
+                    {"eth_signTransaction"}
+                  </STestButton>
+                  <STestButton left onClick={testSignTypedData}>
+                    {"eth_signTypedData"}
+                  </STestButton>
+                  <STestButton left onClick={testLegacySignMessage}>
+                    {"eth_sign (legacy)"}
+                  </STestButton>
+                  <STestButton left onClick={testStandardSignMessage}>
+                    {"eth_sign (standard)"}
+                  </STestButton>
+                  <STestButton left onClick={testPersonalSignMessage}>
+                    {"personal_sign"}
+                  </STestButton>
+                </STestButtonContainer>
+              </Column>
+              <h3>Balances</h3>
+              {!state.fetching ? (
+                <AccountAssets chainId={state.chainId} assets={state.assets} />
+              ) : (
+                <Column center>
+                  <SContainer>
+                    <Loader />
+                  </SContainer>
+                </Column>
+              )}
+            </SBalances>
           )}
-        </Modal>
-      </SLayout>
-    );
-  };
-}
-
+        </SContent>
+      </Column>
+      <Modal show={state.showModal} toggleModal={toggleModal}>
+        {state.pendingRequest ? (
+          <SModalContainer>
+            <SModalTitle>{"Pending Call Request"}</SModalTitle>
+            <SContainer>
+              <Loader />
+              <SModalParagraph>{"Approve or reject request using your wallet"}</SModalParagraph>
+            </SContainer>
+          </SModalContainer>
+        ) : state.result ? (
+          <SModalContainer>
+            <SModalTitle>{"Call Request Approved"}</SModalTitle>
+            <STable>
+              {Object.keys(state.result).map(key => (
+                <SRow key={key}>
+                  <SKey>{key}</SKey>
+                  <SValue>{state.result[key].toString()}</SValue>
+                </SRow>
+              ))}
+            </STable>
+          </SModalContainer>
+        ) : (
+          <SModalContainer>
+            <SModalTitle>{"Call Request Rejected"}</SModalTitle>
+          </SModalContainer>
+        )}
+      </Modal>
+    </SLayout>
+  );
+};
 export default App;
